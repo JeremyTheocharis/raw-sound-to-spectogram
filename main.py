@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from kafka import KafkaConsumer, KafkaProducer
 import io
+import time
 
 RATE = 48000
 IMAGE_SIZE_INCHES = int(5)
@@ -69,19 +70,40 @@ def main():
     # publish to kafka topic
     producer = KafkaProducer(bootstrap_servers=['united-manufacturing-hub-kafka:9092'], client_id='benthos_spectogram_output')
 
+    # create buffer
+    buffer = io.BytesIO()
+
     # endless loop reading from kafka topic
     for msg in consumer:
-        print("Received message")
+        # print("Received message")
         # convert the data to a numpy array
         snd_block = np.frombuffer(msg.value, dtype=np.int16)
+
         # get the spectogram
         spectogram = get_spectogram(snd_block)
+
         # convert the spectogram to a png, save it in a buffer and publish it to kafka
-        buffer = io.BytesIO()
-        spectogram.savefig(buffer, format="png", dpi=DPI)
+
+        # go to the beginning of the buffer
+        buffer.seek(0)
+
+        tick = time.perf_counter()
+        spectogram.savefig(buffer, format="jpg", dpi=DPI)
+        tock = time.perf_counter()
+        print(f"savefig {tock - tick:0.4f} seconds")
+
+        buffer.seek(0)
 
         # publish the png to the kafka topic
         producer.send('ia.raw.spectogram', value=buffer.getvalue())
+
+        buffer.flush()
+        buffer.seek(0)
+
+    # close the buffer
+    buffer.close()
+
+
 
 
 # boilerplate code for main function

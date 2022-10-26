@@ -6,4 +6,4 @@ COPY ./main.py /app/main.py
 RUN pip3 install pandas numpy matplotlib scipy kafka-python
 
 ENTRYPOINT ["python3"]
-CMD ["main.py"]
+CMD ["-u", "main.py"]
