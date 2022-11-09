@@ -1,21 +1,57 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: benthos-raw-sound-to-spectogram
+  name: sound-to-spectogram
   namespace: united-manufacturing-hub
   labels:
-    app: benthos-raw-sound-to-spectogram
+    app: sound-to-spectogram
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: benthos-raw-sound-to-spectogram
+      app: sound-to-spectogram
   template:
     metadata:
       labels:
-        app: benthos-raw-sound-to-spectogram
+        app: sound-to-spectogram
     spec:
       containers:
         - name: benthos-raw-sound-to-spectogram
           image: "unitedmanufacturinghub/raw-sound-to-spectogram"
           imagePullPolicy: Always
+          env:
+          - name: INPUT_TOPIC
+            value: 'ia.raw.audio'
+          - name: OUTPUT_TOPIC
+            value: 'ia.raw.audio.spectogram.1'
+          - name: CHANNEL
+            value: '0'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sound-to-spectogram
+  namespace: united-manufacturing-hub
+  labels:
+    app: sound-to-spectogram
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sound-to-spectogram
+  template:
+    metadata:
+      labels:
+        app: sound-to-spectogram
+    spec:
+      containers:
+        - name: benthos-raw-sound-to-spectogram
+          image: "unitedmanufacturinghub/raw-sound-to-spectogram"
+          imagePullPolicy: Always
+          env:
+          - name: INPUT_TOPIC
+            value: 'ia.raw.audio'
+          - name: OUTPUT_TOPIC
+            value: 'ia.raw.audio.spectogram.2'
+          - name: CHANNEL
+            value: '1'

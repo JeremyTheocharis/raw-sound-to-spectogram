@@ -15,10 +15,16 @@ from matplotlib.colors import LogNorm
 from kafka import KafkaConsumer, KafkaProducer
 import io
 import time
+import base64
+import os
 
 RATE = 48000
 IMAGE_SIZE_INCHES = int(5)
 DPI = int(60)
+
+INPUT_TOPIC = os.environ.get("INPUT_TOPIC", "ia.raw.audio")
+OUTPUT_TOPIC = os.environ.get("OUTPUT_TOPIC", "ia.raw.audio.spectogram")
+CHANNEL = int(os.environ.get("CHANNEL", "1"))
 
 def parse_audio_signal(in_data, channels):
     """
@@ -45,7 +51,7 @@ def get_spectogram(snd_block):
     split_signal = parse_audio_signal(snd_block, 2)
 
     # first channel
-    f, t, Sxx = signal.spectrogram(split_signal[:, 0], RATE)
+    f, t, Sxx = signal.spectrogram(split_signal[:, CHANNEL], RATE)
 
     if Sxx.min() == 0:
         masked_array = Sxx[np.nonzero(Sxx)]
@@ -66,12 +72,9 @@ def get_spectogram(snd_block):
 def main():
     print("Starting spectogram creation")
     # subscribe to kafka topic
-    consumer = KafkaConsumer('ia.raw.audio', bootstrap_servers=['united-manufacturing-hub-kafka:9092'], group_id='benthos_spectogram_input')
+    consumer = KafkaConsumer(INPUT_TOPIC, bootstrap_servers=['united-manufacturing-hub-kafka:9092'], group_id='benthos_spectogram_input_'+str(CHANNEL))
     # publish to kafka topic
-    producer = KafkaProducer(bootstrap_servers=['united-manufacturing-hub-kafka:9092'], client_id='benthos_spectogram_output')
-
-    # create buffer
-    buffer = io.BytesIO()
+    producer = KafkaProducer(bootstrap_servers=['united-manufacturing-hub-kafka:9092'], client_id='benthos_spectogram_output'+str(CHANNEL))
 
     # endless loop reading from kafka topic
     for msg in consumer:
@@ -84,28 +87,29 @@ def main():
 
         # convert the spectogram to a png, save it in a buffer and publish it to kafka
 
-        # go to the beginning of the buffer
-        buffer.seek(0)
-
         tick = time.perf_counter()
-        spectogram.savefig(buffer, format="jpg", dpi=DPI)
+        # spectogram.savefig(buffer, format="jpg", dpi=DPI)
+        spectogram.savefig("spectogram.jpg", dpi=DPI)
         tock = time.perf_counter()
         print(f"savefig {tock - tick:0.4f} seconds")
 
-        buffer.seek(0)
 
-        # publish the png to the kafka topic
-        producer.send('ia.raw.spectogram', value=buffer.getvalue())
+        # read the file spectogram.jpg and publish it to kafka
+        with open("spectogram.jpg", "rb") as f:
+            image = f.read()
+            byteArr = base64.b64encode(image).decode("utf-8")
 
-        buffer.flush()
-        buffer.seek(0)
+            # set timestamp_ms to timestamp of the message (this is added by Kafka to each message, the payload does not contain a timestamp yet)
+            timestamp_ms = msg.timestamp
+            print(f"Processing for timestamp {timestamp_ms}")
+            prepared_message = {
+                "timestamp_ms": str(timestamp_ms),
+                "imageAsBase64": str(byteArr)
+            }
+            producer.send(OUTPUT_TOPIC, json.dumps(prepared_message).encode('utf-8'))
 
-    # close the buffer
-    buffer.close()
-
-
-
-
+        tock = time.perf_counter()
+        print(f"producer.send {tock - tick:0.4f} seconds")
 # boilerplate code for main function
 if __name__ == "__main__":
     main()
