@@ -17,6 +17,7 @@ import io
 import time
 import base64
 import os
+import paho.mqtt.client as mqtt
 
 RATE = 48000
 IMAGE_SIZE_INCHES = int(5)
@@ -25,6 +26,10 @@ DPI = int(60)
 INPUT_TOPIC = os.environ.get("INPUT_TOPIC", "ia.raw.audio")
 OUTPUT_TOPIC = os.environ.get("OUTPUT_TOPIC", "ia.raw.audio.spectogram")
 CHANNEL = int(os.environ.get("CHANNEL", "1"))
+
+# read env variable MQTTMode with default value false
+MQTTMode = os.environ.get("MQTTMode", "false")
+
 
 def parse_audio_signal(in_data, channels):
     """
@@ -69,7 +74,54 @@ def get_spectogram(snd_block):
     # return image as png
     return figure
 
-def main():
+# this is the main function if MQTT is used
+def main_mqtt():
+    print("Starting spectogram creation in MQTT")
+    # subscribe to mqtt topic
+    client = mqtt.Client()
+    client.connect("mqtt_broker", 1883, 60)
+    # subscribe to the topic
+    client.subscribe(INPUT_TOPIC)
+
+    # foreach message received, create a spectogram and publish it to the output topic
+    client.on_message = on_message
+    client.loop_forever()
+
+def on_message(client, userdata, msg):
+    print("Received message")
+    snd_block = np.frombuffer(msg.payload, dtype=np.int16)
+
+    # get the spectogram
+    spectogram = get_spectogram(snd_block)
+
+    # convert the spectogram to a png, save it in a buffer and publish it to kafka
+
+    tick = time.perf_counter()
+    spectogram.savefig("spectogram.jpg", dpi=DPI)
+    tock = time.perf_counter()
+    print(f"savefig {tock - tick:0.4f} seconds")
+
+
+    # read the file spectogram.jpg and publish it to kafka
+    with open("spectogram.jpg", "rb") as f:
+        image = f.read()
+        byteArr = base64.b64encode(image).decode("utf-8")
+
+        # set timestamp_ms to timestamp of the message (this is added by Kafka to each message, the payload does not contain a timestamp yet)
+        timestamp_ms = msg.timestamp
+        print(f"Processing for timestamp {timestamp_ms}")
+        prepared_message = {
+            "timestamp_ms": str(timestamp_ms),
+            "image": {
+                "image_bytes": str(byteArr),
+            }
+        }
+        # publish the message to the output topic
+        client.publish(OUTPUT_TOPIC, json.dumps(prepared_message))
+
+
+# this is the main function if Kafka is used (default)
+def main_kafka():
     print("Starting spectogram creation")
     # subscribe to kafka topic
     consumer = KafkaConsumer(INPUT_TOPIC, bootstrap_servers=['united-manufacturing-hub-kafka:9092'], group_id='benthos_spectogram_input_'+str(CHANNEL))
@@ -110,6 +162,11 @@ def main():
 
         tock = time.perf_counter()
         print(f"producer.send {tock - tick:0.4f} seconds")
+
+
 # boilerplate code for main function
 if __name__ == "__main__":
-    main()
+    if MQTTMode == "true":
+        main_mqtt()
+    else:
+        main_kafka()
