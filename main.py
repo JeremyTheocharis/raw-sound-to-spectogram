@@ -18,6 +18,7 @@ import time
 import base64
 import os
 import paho.mqtt.client as mqtt
+import uuid
 
 RATE = 48000
 IMAGE_SIZE_INCHES = int(5)
@@ -71,8 +72,14 @@ def get_spectogram(snd_block):
     plt.pcolormesh(t, f, Sxx, cmap="RdBu", norm=LogNorm(vmin=zmin, vmax=zmax), shading="auto")
     plt.axis("off")
 
-    # return image as png
-    return figure
+    uid = str(uuid.uuid4())+".jpg"
+    tick = time.perf_counter()
+    plt.savefig(uid, dpi=DPI)
+    plt.close()
+    tock = time.perf_counter()
+    print(f"savefig {tock - tick:0.4f} seconds for {uid}")
+
+    return uid
 
 # this is the main function if MQTT is used
 def main_mqtt():
@@ -91,24 +98,17 @@ def on_message(client, userdata, msg):
     print("Received message")
     snd_block = np.frombuffer(msg.payload, dtype=np.int16)
 
-    # get the spectogram
-    spectogram = get_spectogram(snd_block)
+    # set timestamp_ms to the current time in milliseconds
+    timestamp_ms = int(round(time.time() * 1000))
 
-    # convert the spectogram to a png, save it in a buffer and publish it to kafka
-
-    tick = time.perf_counter()
-    spectogram.savefig("spectogram.jpg", dpi=DPI)
-    tock = time.perf_counter()
-    print(f"savefig {tock - tick:0.4f} seconds")
-
+    # get the spectogram, function returns the UID of the file
+    spectogramUID = get_spectogram(snd_block)
 
     # read the file spectogram.jpg and publish it to kafka
-    with open("spectogram.jpg", "rb") as f:
+    with open(spectogramUID, "rb") as f:
         image = f.read()
         byteArr = base64.b64encode(image).decode("utf-8")
 
-        # set timestamp_ms to timestamp of the message (this is added by Kafka to each message, the payload does not contain a timestamp yet)
-        timestamp_ms = msg.timestamp
         print(f"Processing for timestamp {timestamp_ms}")
         prepared_message = {
             "timestamp_ms": str(timestamp_ms),
@@ -118,6 +118,9 @@ def on_message(client, userdata, msg):
         }
         # publish the message to the output topic
         client.publish(OUTPUT_TOPIC, json.dumps(prepared_message))
+
+    # delete the spectogram
+    os.remove(spectogramUID)
 
 
 # this is the main function if Kafka is used (default)
@@ -135,19 +138,10 @@ def main_kafka():
         snd_block = np.frombuffer(msg.value, dtype=np.int16)
 
         # get the spectogram
-        spectogram = get_spectogram(snd_block)
-
-        # convert the spectogram to a png, save it in a buffer and publish it to kafka
-
-        tick = time.perf_counter()
-        # spectogram.savefig(buffer, format="jpg", dpi=DPI)
-        spectogram.savefig("spectogram.jpg", dpi=DPI)
-        tock = time.perf_counter()
-        print(f"savefig {tock - tick:0.4f} seconds")
-
+        spectogramUID = get_spectogram(snd_block)
 
         # read the file spectogram.jpg and publish it to kafka
-        with open("spectogram.jpg", "rb") as f:
+        with open(spectogramUID, "rb") as f:
             image = f.read()
             byteArr = base64.b64encode(image).decode("utf-8")
 
@@ -163,6 +157,8 @@ def main_kafka():
         tock = time.perf_counter()
         print(f"producer.send {tock - tick:0.4f} seconds")
 
+        # delete the spectogram
+        os.remove(spectogramUID)
 
 # boilerplate code for main function
 if __name__ == "__main__":
